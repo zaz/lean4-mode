@@ -45,10 +45,10 @@
 (require 'pcase)
 
 (require 'lean4-eri)
+(require 'lean4-exec)
 (require 'lean4-fringe)
 (require 'lean4-info)
 (require 'lean4-syntax)
-(require 'lean4-util)
 
 (require 'dash)
 (require 'lsp-mode)
@@ -76,35 +76,24 @@
   :link '(emacs-library-link :tag "Library Source" "lean4-mode.el")
   :prefix "lean4-")
 
-(defun lean4-compile-string (lake-name exe-name args file-name)
-  "Command to run EXE-NAME with extra ARGS and FILE-NAME.
-If LAKE-NAME is nonempty, then prepend \"LAKE-NAME env\" to the command
-\"EXE-NAME ARGS FILE-NAME\"."
-  (if lake-name
-      (format "%s env %s %s %s" lake-name exe-name args file-name)
-      (format "%s %s %s" exe-name args file-name)))
+(defcustom lean4-delete-trailing-whitespace nil
+  "Delete trailing whitespace before saving buffer to file.
+
+If this variable is non-nil, Lean4-Mode will delete trailing whitespace
+of every line before the buffer is saved to file."
+  :group 'lean4
+  :type 'boolean)
+
+(defun lean4-whitespace-cleanup ()
+  "When `lean4-delete-trailing-whitespace', delete trailing whitespace."
+  (when lean4-delete-trailing-whitespace
+      (delete-trailing-whitespace)))
 
 (defun lean4-create-temp-in-system-tempdir (file-name prefix)
   "Create a temp lean file and return its name.
 The new file has prefix PREFIX (defaults to `flymake') and the same extension as
 FILE-NAME."
   (make-temp-file (or prefix "flymake") nil (file-name-extension file-name)))
-
-(defun lean4-execute (&optional arg)
-  "Execute Lean in the current buffer with an optional argument ARG."
-  (interactive "sArgument to Lean4 executable: ")
-  (let* ((use-lake (lean4-lake-find-dir))
-         (default-directory (if use-lake (lean4-lake-find-dir)
-                              default-directory))
-         (target-file-name
-          (or
-           (buffer-file-name)
-           (flymake-proc-init-create-temp-buffer-copy 'lean4-create-temp-in-system-tempdir))))
-    (compile (lean4-compile-string
-              (if use-lake (shell-quote-argument (expand-file-name (lean4-get-executable lean4-lake-name))) nil)
-              (shell-quote-argument (expand-file-name (lean4-get-executable lean4-executable-name)))
-              (or arg "")
-              (shell-quote-argument (expand-file-name target-file-name))))))
 
 (defun lean4-refresh-file-dependencies ()
   "Refresh the file dependencies.
@@ -124,7 +113,7 @@ file, recompiling, and reloading all imports."
                :text (lsp--buffer-content)))))
 
 (defun lean4-tab-indent ()
-  "Lean 4 function for TAB indent."
+  "Lean4 function for TAB indent."
   (interactive)
   (cond ((looking-back (rx line-start (* white)) nil)
          (lean4-eri-indent))
@@ -132,8 +121,6 @@ file, recompiling, and reloading all imports."
 
 (defvar-keymap lean4-mode-map
   :doc "Keymap for `lean4-mode'."
-  "C-c C-x"     #'lean4-execute
-  "C-c C-l"     #'lean4-execute
   "C-c C-k"     #'quail-show-key
   "TAB"         #'lean4-tab-indent
   "C-c C-i"     #'lean4-toggle-info
@@ -142,25 +129,23 @@ file, recompiling, and reloading all imports."
 
 (easy-menu-define lean4-mode-menu lean4-mode-map
   "Menu for the Lean major mode."
-  `("Lean 4"
-    ["Execute lean"         lean4-execute           t]
-    ["Toggle info display"  lean4-toggle-info       t]
+  `("Lean4"
+    ["Toggle info display" lean4-toggle-info t]
     ;; TODO: Bug#91: We offers a Flycheck-based menu-item when
     ;; Flycheck is in use.  Users who use built-in Flymake should also
     ;; be offered a working menu-item.  Alternatively, the menu-item
     ;; could also be dropped for both cases.
-    ["List of errors"       flycheck-list-errors    (bound-and-true-p flycheck-mode)]
-    ["Restart lean process" lsp-workspace-restart   t]
-    ["Customize lean4-mode" (customize-group 'lean) t]))
+    ["List of errors" flycheck-list-errors (bound-and-true-p flycheck-mode)]
+    ["Restart Lean4 LSP server" lsp-workspace-restart t]
+    ["Customize lean4-mode" (customize-group 'lean4) t]))
 
 (defun lean4-lsp-init-workspace ()
-  "Create an LSP workspace.
+  "Initialize Lean4 `lsp-mode' workspace.
 
-Starting from `(buffer-file-name)`, repeatedly look up the
-directory hierarchy for a directory containing a file
-\"lean-toolchain\", and use the last such directory found, if any.
-This allows us to edit files in child packages using the settings
-of the parent project."
+Starting from function `buffer-file-name', repeatedly look up the
+directory hierarchy for a directory containing a file `lean-toolchain',
+and use the last such directory found, if any.  This allows us to edit
+files in child packages using the settings of the parent project."
   (let (root)
     (when-let ((file-name (buffer-file-name)))
       (while-let ((dir (locate-dominating-file file-name "lean-toolchain")))
@@ -182,8 +167,21 @@ of the parent project."
   (require 'lean4-input)
   (set-input-method "Lean4"))
 
+(defun lean4-init-compile-command ()
+  "When `lean4-exec-lean-full', setup `compile-command' for `lean4-mode'."
+  (interactive)
+  (when lean4-exec-lean-full
+    (setq-local compile-command
+                (string-join (append lean4-exec-lean-full
+                                     '("build"))
+                             " "))))
+
 (defcustom lean4-mode-hook
   (list #'lean4-init-input-method
+        #'lean4-exec-elan-init
+        #'lean4-exec-lake-init
+        #'lean4-exec-lean-init
+        #'lean4-init-compile-command
         #'lean4-lsp-init-semantic-token
         #'lean4-lsp-init-workspace
         #'lsp)
@@ -194,6 +192,10 @@ it will be called by `lsp'.  Similarly, `flycheck-mode' should not be
 added here because it will be called by `lsp' if the variable
 `lsp-diagnostics-provider' is set accordingly."
   :options '(lean4-init-input-method
+             lean4-exec-elan-init
+             lean4-exec-lake-init
+             lean4-exec-lean-init
+             lean4-init-compile-command
              lean4-lsp-init-semantic-token
              lean4-lsp-init-workspace
              lsp)
@@ -293,31 +295,42 @@ outside a project will default to that mode."
   (add-to-list 'markdown-code-lang-modes
                '("lean" . lean4-select-mode)))
 
-;; Use utf-8 encoding
-;;;### autoload
+;; According to the Lean4 reference manual, Lean4 code must be encoded
+;; as `utf-8':
+;; https://lean-lang.org/doc/reference/latest/Source-Files/Files/
+;;;###autoload
 (modify-coding-system-alist 'file "\\.lean\\'" 'utf-8)
 
-;; LSP init
-;; Ref: https://emacs-lsp.github.io/lsp-mode/page/adding-new-language/
+;; https://emacs-lsp.github.io/lsp-mode/page/adding-new-language/
 (add-to-list 'lsp-language-id-configuration
-             '(lean4-mode . "lean"))
+             '(lean4-mode . "lean4"))
 
-(defun lean4--server-cmd ()
-  "Return Lean server command.
-If found lake version at least 3.1.0, then return '/path/to/lake serve',
-otherwise return '/path/to/lean --server'."
-  (condition-case nil
-      (if (string-version-lessp (car (process-lines (lean4-get-executable "lake") "--version")) "3.1.0")
-          `(,(lean4-get-executable lean4-executable-name) "--server")
-        `(,(lean4-get-executable "lake") "serve"))
-    (error `(,(lean4-get-executable lean4-executable-name) "--server"))))
+(defun lean4-lsp-server-command ()
+  "Lean4 LSP server command."
+  (cond
+   (lean4-exec-lake-full
+    (append lean4-exec-lake-full '("serve")))
+   (lean4-exec-lean-full
+    (append lean4-exec-lean-full '("--serve")))))
 
 (lsp-register-client
- (make-lsp-client :new-connection (lsp-stdio-connection #'lean4--server-cmd)
-                  :major-modes '(lean4-mode)
-                  :server-id 'lean4-lsp
-                  :notification-handlers (ht ("$/lean/fileProgress" #'lean4-fringe-update))
-                  :semantic-tokens-faces-overrides '(:types (("leanSorryLike" . font-lock-warning-face)))))
+ (make-lsp-client
+  :language-id "lean4"
+  :major-modes '(lean4-mode)
+  :new-connection
+  (lsp-stdio-connection #'lean4-lsp-server-command
+                        ;; We don't want to pass the server command to
+                        ;; `executable-find' so that `lean4-exec'
+                        ;; keeps control over the exact path (or not,
+                        ;; if it doesn't want to).
+                        #'always)
+  :notification-handlers
+  (ht ("$/lean/fileProgress" #'lean4-fringe-update))
+  ;; The semantic token type `leanSorryLike' is a Lean4-specific
+  ;; extension of LSP.
+  :semantic-tokens-faces-overrides
+  '(:types (("leanSorryLike" . font-lock-warning-face)))
+  :server-id 'lean4))
 
 (provide 'lean4-mode)
 ;;; lean4-mode.el ends here
