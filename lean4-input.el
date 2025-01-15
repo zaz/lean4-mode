@@ -304,9 +304,14 @@ Suitable for use in the :set field of `defcustom'."
   (lean4-input-setup))
 
 ;; Set up the input method.
-
 (cl-eval-when (load eval)
   (lean4-input-setup))
+
+(defun lean4-input-init ()
+  "Setup the input method for `lean4-mode'."
+  (interactive)
+  (require 'lean4-input)
+  (set-input-method "Lean4"))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Administrative details

@@ -112,20 +112,12 @@ file, recompiling, and reloading all imports."
                :version lsp--cur-version
                :text (lsp--buffer-content)))))
 
-(defun lean4-tab-indent ()
-  "Lean4 function for TAB indent."
-  (interactive)
-  (cond ((looking-back (rx line-start (* white)) nil)
-         (lean4-eri-indent))
-        (t (indent-for-tab-command))))
-
 (defvar-keymap lean4-mode-map
   :doc "Keymap for `lean4-mode'."
-  "C-c C-k"     #'quail-show-key
-  "TAB"         #'lean4-tab-indent
-  "C-c C-i"     #'lean4-toggle-info
-  "C-c C-p C-l" #'lean4-lake-build
-  "C-c C-d"     #'lean4-refresh-file-dependencies)
+  "C-c C-k" #'quail-show-key
+  "C-c C-i" #'lean4-toggle-info
+  "C-c C-c" #'project-compile
+  "C-c C-d" #'lean4-refresh-file-dependencies)
 
 (easy-menu-define lean4-mode-menu lean4-mode-map
   "Menu for the Lean major mode."
@@ -161,27 +153,13 @@ files in child packages using the settings of the parent project."
   (interactive)
   (setq-local lsp-semantic-tokens-enable t))
 
-(defun lean4-init-input-method ()
-  "Setup the input method for `lean4-mode'."
-  (interactive)
-  (require 'lean4-input)
-  (set-input-method "Lean4"))
-
-(defun lean4-init-compile-command ()
-  "When `lean4-exec-lean-full', setup `compile-command' for `lean4-mode'."
-  (interactive)
-  (when lean4-exec-lean-full
-    (setq-local compile-command
-                (string-join (append lean4-exec-lean-full
-                                     '("build"))
-                             " "))))
-
 (defcustom lean4-mode-hook
-  (list #'lean4-init-input-method
+  (list #'lean4-input-init
         #'lean4-exec-elan-init
         #'lean4-exec-lake-init
         #'lean4-exec-lean-init
-        #'lean4-init-compile-command
+        #'lean4-exec-compile-command-init
+        #'lean4-eri-init
         #'lean4-lsp-init-semantic-token
         #'lean4-lsp-init-workspace
         #'lsp)
@@ -191,11 +169,12 @@ Note that there's no need to add `lsp-diagnostics-mode' to this hook as
 it will be called by `lsp'.  Similarly, `flycheck-mode' should not be
 added here because it will be called by `lsp' if the variable
 `lsp-diagnostics-provider' is set accordingly."
-  :options '(lean4-init-input-method
+  :options '(lean4-input-init
              lean4-exec-elan-init
              lean4-exec-lake-init
              lean4-exec-lean-init
-             lean4-init-compile-command
+             lean4-exec-compile-command-init
+             lean4-eri-init
              lean4-lsp-init-semantic-token
              lean4-lsp-init-workspace
              lsp)
@@ -226,8 +205,6 @@ added here because it will be called by `lsp' if the variable
               nil)
   (setq-local font-lock-defaults
               lean4-font-lock-defaults)
-  (setq-local lisp-indent-function
-              #'common-lisp-indent-function)
 
   ;; Clean up whitespace before saving.
   (add-hook 'before-save-hook
@@ -236,12 +213,6 @@ added here because it will be called by `lsp' if the variable
   (add-hook 'post-command-hook
             #'lean4-info-buffer-redisplay-debounced
             nil 'local)
-
-  ;; Turn off modes that may interfere with our indentation
-  ;; (`lean4-eri').
-  (if (fboundp 'electric-indent-local-mode)
-      (electric-indent-local-mode -1))
-  (indent-tabs-mode -1)
 
   ;; Flycheck:
   (setq-local flycheck-disabled-checkers

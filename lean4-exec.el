@@ -204,5 +204,15 @@ to this value."
               (run-hook-with-args-until-success
                'lean4-exec-lean-hook)))
 
+;;;; Compile Command
+
+(defun lean4-exec-compile-command-init ()
+  "When `lean4-exec-lean-full', setup `compile-command' for `lean4-mode'."
+  (interactive)
+  (when lean4-exec-lean-full
+    (setq-local compile-command
+                (string-join (append lean4-exec-lean-full '("build"))
+                             " "))))
+
 (provide 'lean4-exec)
 ;;; lean4-exec.el ends here

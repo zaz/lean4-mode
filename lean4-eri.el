@@ -223,5 +223,24 @@ are calculated."
   (interactive)
   (lean4-eri-indent t))
 
+(defun lean4-eri-tab ()
+  "Lean4 function for TAB indent."
+  (interactive)
+  (if (looking-back (rx line-start (* white)) nil)
+      (lean4-eri-indent)
+    (let ((indent-line-function 'indent-relative))
+      (indent-for-tab-command))))
+
+(defun lean4-eri-init ()
+  "Setup buffer-local variables and minor modes for `lean4-eri'."
+  (setq-local indent-line-function
+              #'lean4-eri-tab)
+  (setq-local lisp-indent-function
+              #'common-lisp-indent-function)
+  (when (fboundp 'electric-indent-local-mode)
+      (electric-indent-local-mode -1))
+  (when (fboundp 'indent-tabs-mode)
+    (indent-tabs-mode -1)))
+
 (provide 'lean4-eri)
 ;;; lean4-eri.el ends here
