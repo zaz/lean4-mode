@@ -31,13 +31,14 @@
 
 ;;; Commentary:
 
-;; Provides a major mode for the Lean programming language.
+;; This is `lean4-mode', an Elpa package for Emacs that provides a
+;; major mode for the Lean programming language and theorem prover.
+;; The mode features highlighting, diagnostics, goal visualization,
+;; among others.  For more information, see read the README.org or
+;; equally the Info manual (info "(lean4-mode) Top").
 
-;; Provides highlighting, diagnostics, goal visualization,
-;; and many other useful features for Lean users.
-
-;; For more information, see the README.org which is also provided as
-;; Info manual.
+;; This file is the entry point for the equally named package.  It
+;; defines the major mode, the syntax and other core features.
 
 ;;; Code:
 
@@ -131,7 +132,7 @@ file, recompiling, and reloading all imports."
     ["Restart Lean4 LSP server" lsp-workspace-restart t]
     ["Customize lean4-mode" (customize-group 'lean4) t]))
 
-(defun lean4-lsp-init-workspace ()
+(defun lean4-lsp-workspace-init ()
   "Initialize Lean4 `lsp-mode' workspace.
 
 Starting from function `buffer-file-name', repeatedly look up the
@@ -148,20 +149,18 @@ files in child packages using the settings of the parent project."
     (when root
       (lsp-workspace-folders-add root))))
 
-(defun lean4-lsp-init-semantic-token ()
+(defun lean4-lsp-semantic-token-init ()
   "Buffer-locally enable `lsp-mode's support for semantic tokens."
   (interactive)
   (setq-local lsp-semantic-tokens-enable t))
 
 (defcustom lean4-mode-hook
   (list #'lean4-input-init
-        #'lean4-exec-elan-init
-        #'lean4-exec-lake-init
-        #'lean4-exec-lean-init
+        #'lean4-exec-init
         #'lean4-exec-compile-command-init
         #'lean4-eri-init
-        #'lean4-lsp-init-semantic-token
-        #'lean4-lsp-init-workspace
+        #'lean4-lsp-semantic-token-init
+        #'lean4-lsp-workspace-init
         #'lsp)
   "Hook run after entering `lean4-mode'.
 
@@ -170,13 +169,11 @@ it will be called by `lsp'.  Similarly, `flycheck-mode' should not be
 added here because it will be called by `lsp' if the variable
 `lsp-diagnostics-provider' is set accordingly."
   :options '(lean4-input-init
-             lean4-exec-elan-init
-             lean4-exec-lake-init
-             lean4-exec-lean-init
+             lean4-exec-init
              lean4-exec-compile-command-init
              lean4-eri-init
-             lean4-lsp-init-semantic-token
-             lean4-lsp-init-workspace
+             lean4-lsp-semantic-token-init
+             lean4-lsp-workspace-init
              lsp)
   :type 'hook
   :group 'lean4)
@@ -227,44 +224,59 @@ added here because it will be called by `lsp' if the variable
             #'lean4-info-buffer-refresh
             nil 'local))
 
-(defun lean4--version ()
-  "Return Lean version as a list `(MAJOR MINOR PATCH)'."
-  (with-temp-buffer
-    (call-process (lean4-get-executable "lean") nil (list t nil) nil "-v")
-    (goto-char (point-min))
-    (re-search-forward (rx bol "Lean (version " (group (+ digit) (+ "." (+ digit)))))
-    (version-to-list (match-string 1))))
+(defun lean4-version-extract ()
+  "Return Lean version as a list (MAJOR MINOR PATCH)."
+  (when lean4-exec-lean-full
+    (let* ((executable (car lean4-exec-lean-full))
+           (base-arguments (cdr lean4-exec-lean-full)))
+      (with-temp-buffer
+        (call-process
+         executable nil (list t nil) nil
+         (string-join (append base-arguments '("-v")) " "))
+        (goto-char (point-min))
+        (re-search-forward
+         (rx line-start "Lean (version "
+             (group (one-or-more digit)
+                    (one-or-more "." (one-or-more digit)))))
+        (version-to-list (match-string 1))))))
 
-(defun lean4-show-version ()
-  "Print Lean 4 version."
+(defun lean4-version ()
+  "Echo version of Lean used by current buffer."
   (interactive)
-  (message "Lean %s" (mapconcat #'number-to-string (lean4--version) ".")))
+  (message "Lean %s" (mapconcat #'number-to-string
+                                (lean4-version-extract)
+                                ".")))
 
-(defcustom lean4-autodetect-lean3 nil
-  "Autodetect Lean version.
-Use elan to check if current project uses Lean 3 or Lean 4 and initialize the
-right mode when visiting a file.  If elan has a default Lean version, Lean files
-outside a project will default to that mode."
+(defcustom lean4-version-adapt nil
+  "Check Lean version.
+
+In case of legacy version 3, turn on `lean-mode'.
+Otherwise, turn on `lean4-mode'."
   :group 'lean4
   :type 'boolean)
 
 ;;;###autoload
-(defun lean4-select-mode ()
-  "Automatically select mode (Lean 3 vs Lean 4)."
-  (if (and lean4-autodetect-lean3
-           (eq 3 (car (lean4--version))))
+(defun lean4-turn-on ()
+  "Turn on `lean4-mode' but with respect to `lean4-version-adapt'."
+  (if (and
+       ;; User wants to adapt to Lean version.
+       lean4-version-adapt
+       ;; We are able to find a Lean executable.
+       (lean4-exec-init)
+       ;; The major version of found Lean executable has is three.
+       (eq 3 (car-safe (lean4-version-extract))))
       (lean-mode)
     (lean4-mode)))
 
 ;; Automatically use lean4-mode for .lean files.
 ;;;###autoload
 (add-to-list 'auto-mode-alist
-             '("\\.lean\\'" . lean4-select-mode))
+             '("\\.lean\\'" . lean4-turn-on))
 
 ;;;###autoload
 (with-eval-after-load 'markdown-mode
   (add-to-list 'markdown-code-lang-modes
-               '("lean" . lean4-select-mode)))
+               '("lean" . lean4-turn-on)))
 
 ;; According to the Lean4 reference manual, Lean4 code must be encoded
 ;; as `utf-8':
@@ -277,12 +289,12 @@ outside a project will default to that mode."
              '(lean4-mode . "lean4"))
 
 (defun lean4-lsp-server-command ()
-  "Lean4 LSP server command."
+  "Lean4 LSP server command.
+
+`lake serve' is preferred over `lean --serve'."
   (cond
-   (lean4-exec-lake-full
-    (append lean4-exec-lake-full '("serve")))
-   (lean4-exec-lean-full
-    (append lean4-exec-lean-full '("--serve")))))
+   (lean4-exec-lake-full (append lean4-exec-lake-full '("serve")))
+   (lean4-exec-lean-full (append lean4-exec-lean-full '("--serve")))))
 
 (lsp-register-client
  (make-lsp-client

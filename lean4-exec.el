@@ -18,7 +18,9 @@
 
 ;;; Commentary:
 
-;; TODO
+;; This file provides a facility to locate the executables of Elan,
+;; Lake and Lean so that they can be used to build/compile the current
+;; project, start an LSP server or execute some other shell command.
 
 ;;; Code:
 
@@ -46,7 +48,7 @@ if necessary.")
   (declare (side-effect-free t))
   (ensure-list (executable-find lean4-exec-elan-base)))
 
-(defcustom lean4-exec-elan-hook
+(defcustom lean4-exec-elan-init-hook
   (list #'lean4-exec-elan-executable-find)
   "Hook of functions to determine `lean4-exec-elan-full'.
 
@@ -63,12 +65,12 @@ the Elan executable."
 (defun lean4-exec-elan-init ()
   "Buffer-locally set up `lean4-exec-elan-full'.
 
-Call functions from `lean4-exec-elan-hook' until one succeeds,
+Call functions from `lean4-exec-elan-init-hook' until one succeeds,
 i.e. returns non-nil.  `lean4-exec-elan-full' is then buffer-locally set
 to this value."
   (setq-local lean4-exec-elan-full
               (run-hook-with-args-until-success
-               'lean4-exec-elan-hook)))
+               'lean4-exec-elan-init-hook)))
 
 ;;;; Lake
 
@@ -105,7 +107,7 @@ if necessary.")
   (declare (side-effect-free t))
   (ensure-list (executable-find lean4-exec-lake-base)))
 
-(defcustom lean4-exec-lake-hook
+(defcustom lean4-exec-lake-init-hook
   (list
    #'lean4-exec-lake-elan-which
    #'lean4-exec-lake-executable-find)
@@ -124,12 +126,12 @@ the Lake executable."
 (defun lean4-exec-lake-init ()
   "Buffer-locally set up `lean4-exec-lake-full'.
 
-Call functions from `lean4-exec-lake-hook' until one succeeds,
+Call functions from `lean4-exec-lake-init-hook' until one succeeds,
 i.e. returns non-nil.  `lean4-exec-lake-full' is then buffer-locally set
 to this value."
   (setq-local lean4-exec-lake-full
               (run-hook-with-args-until-success
-               'lean4-exec-lake-hook)))
+               'lean4-exec-lake-init-hook)))
 
 ;;;; Lean
 
@@ -175,7 +177,7 @@ if necessary.")
             ;; "lean" as subcommand.
             '("lake"))))
 
-(defcustom lean4-exec-lean-hook
+(defcustom lean4-exec-lean-init-hook
   (list
    #'lean4-exec-lean-getenv
    #'lean4-exec-lean-elan-which
@@ -197,14 +199,23 @@ the Lean4 executable."
 (defun lean4-exec-lean-init ()
   "Buffer-locally set up `lean4-exec-lean-full'.
 
-Call functions from `lean4-exec-lean-hook' until one succeeds,
+Call functions from `lean4-exec-lean-init-hook' until one succeeds,
 i.e. returns non-nil.  `lean4-exec-lean-full' is then buffer-locally set
 to this value."
   (setq-local lean4-exec-lean-full
               (run-hook-with-args-until-success
-               'lean4-exec-lean-hook)))
+               'lean4-exec-lean-init-hook)))
 
-;;;; Compile Command
+;;;; Initialization
+
+(defun lean4-exec-init ()
+  "Initialize full paths to Elan, Lake and Lean executables.
+
+If a Lean executable was found, return its path.  Otherwise, return nil."
+  (interactive)
+  (lean4-exec-elan-init)
+  (lean4-exec-lake-init)
+  (lean4-exec-lean-init))
 
 (defun lean4-exec-compile-command-init ()
   "When `lean4-exec-lean-full', setup `compile-command' for `lean4-mode'."
